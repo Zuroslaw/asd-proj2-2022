@@ -19,9 +19,7 @@ import protocols.statemachine.requests.OrderRequest;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 
 /**
  * This is NOT fully functional StateMachine implementation.
@@ -49,6 +47,8 @@ public class StateMachine extends GenericProtocol {
     private State state;
     private List<Host> membership;
     private int nextInstance;
+
+    private Queue<OrderRequest> queue = new LinkedList<>();
 
     public StateMachine(Properties props) throws IOException, HandlerRegistrationException {
         super(PROTOCOL_NAME, PROTOCOL_ID);
@@ -117,17 +117,27 @@ public class StateMachine extends GenericProtocol {
 
     }
 
+    private final Set<UUID> internalOperationsIds = new HashSet<>();
+    private OrderRequest currentOrder = null;
+
     /*--------------------------------- Requests ---------------------------------------- */
     private void uponOrderRequest(OrderRequest request, short sourceProto) {
         logger.debug("Received request: " + request);
         if (state == State.JOINING) {
             //Do something smart (like buffering the requests)
         } else if (state == State.ACTIVE) {
+
+            if (currentOrder == null) {
+                sendRequest(new ProposeRequest(nextInstance++, request.getOpId(), request.getOperation()),
+                        IncorrectAgreement.PROTOCOL_ID);
+                currentOrder = request;
+            } else {
+                queue.offer(request);
+            }
+
             //Also do something starter, we don't want an infinite number of instances active
         	//Maybe you should modify what is it that you are proposing so that you remember that this
         	//operation was issued by the application (and not an internal operation, check the uponDecidedNotification)
-            sendRequest(new ProposeRequest(nextInstance++, request.getOpId(), request.getOperation()),
-                    IncorrectAgreement.PROTOCOL_ID);
         }
     }
 
@@ -135,9 +145,24 @@ public class StateMachine extends GenericProtocol {
     private void uponDecidedNotification(DecidedNotification notification, short sourceProto) {
         logger.debug("Received notification: " + notification);
         //Maybe we should make sure operations are executed in order?
-        //You should be careful and check if this operation if an application operation (and send it up)
+        //You should be careful and check if this operation is an application operation (and send it up)
         //or if this is an operations that was executed by the state machine itself (in which case you should execute)
-        triggerNotification(new ExecuteNotification(notification.getOpId(), notification.getOperation()));
+
+        if (internalOperationsIds.contains(notification.getOpId())) {
+            // do the internal operation //todo
+        } else {
+            triggerNotification(new ExecuteNotification(notification.getOpId(), notification.getOperation()));
+            nextInstance = Math.max(notification.getInstance(), nextInstance);
+            if (notification.getOpId().equals(currentOrder.getOpId())) {
+                currentOrder = null;
+            }
+            if (!queue.isEmpty()) {
+                OrderRequest request = queue.peek();
+                currentOrder = request;
+                sendRequest(new ProposeRequest(nextInstance++, request.getOpId(), request.getOperation()),
+                        IncorrectAgreement.PROTOCOL_ID);
+            }
+        }
     }
 
     /*--------------------------------- Messages ---------------------------------------- */
