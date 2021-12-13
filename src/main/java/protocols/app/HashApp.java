@@ -1,5 +1,7 @@
 package protocols.app;
 
+import protocols.app.requests.CurrentStateReply;
+import protocols.app.requests.CurrentStateRequest;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
@@ -13,8 +15,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import protocols.app.messages.RequestMessage;
 import protocols.app.messages.ResponseMessage;
-import protocols.app.requests.CurrentStateReply;
-import protocols.app.requests.CurrentStateRequest;
 import protocols.app.requests.InstallStateRequest;
 import protocols.app.utils.Operation;
 import protocols.statemachine.StateMachine;
@@ -89,14 +89,14 @@ public class HashApp extends GenericProtocol {
     public void init(Properties props) {
     }
 
-    private void uponCurrentStateRequest(CurrentStateRequest req, short sourceProto) {
+    private void uponCurrentStateRequest(CurrentStateRequest reqJoin, short sourceProto) {
         byte[] state;
         try {
             state = this.getCurrentState();
         } catch (IOException e) {
             throw new AssertionError("Could not get current state of the application.", e);
         }
-        sendReply(new CurrentStateReply(req.getInstance(), state), sourceProto);
+        sendReply(new CurrentStateReply(reqJoin.getInstance(), state, reqJoin.getJoiner()), sourceProto);
     }
 
     private void uponInstallStateRequest(InstallStateRequest req, short sourceProto) {

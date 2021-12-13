@@ -1,6 +1,14 @@
 package protocols.statemachine;
 
 import protocols.agreement.notifications.JoinedNotification;
+import protocols.app.HashApp;
+import protocols.app.messages.RequestMessage;
+import protocols.app.messages.ResponseMessage;
+import protocols.app.requests.CurrentStateReply;
+import protocols.app.requests.CurrentStateRequest;
+import protocols.app.requests.InstallStateRequest;
+import protocols.statemachine.messages.JoinMessage;
+import protocols.statemachine.messages.JoinOKMessage;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
@@ -78,8 +86,19 @@ public class StateMachine extends GenericProtocol {
         /*--------------------- Register Request Handlers ----------------------------- */
         registerRequestHandler(OrderRequest.REQUEST_ID, this::uponOrderRequest);
 
+        /*--------------------- Register Reply Handlers ----------------------------- */
+        registerReplyHandler(CurrentStateReply.REQUEST_ID, this::uponCurrentStateReply);
+
+        /*--------------------- Register Message Handlers ----------------------------- */
+        registerMessageHandler(channelId, JoinMessage.MSG_ID, this::uponJoinMessage);
+        registerMessageHandler(channelId, JoinOKMessage.MSG_ID, this::uponJoinOKMessage);
+
         /*--------------------- Register Notification Handlers ----------------------------- */
         subscribeNotification(DecidedNotification.NOTIFICATION_ID, this::uponDecidedNotification);
+
+        /*--------------------- Register Message Serializers ----------------------------- */
+        registerMessageSerializer(channelId, JoinMessage.MSG_ID, JoinMessage.serializer);
+        registerMessageSerializer(channelId, JoinOKMessage.MSG_ID, JoinOKMessage.serializer);
     }
 
     @Override
@@ -113,6 +132,13 @@ public class StateMachine extends GenericProtocol {
             logger.info("Starting in JOINING as I am not part of initial membership");
             //You have to do something to join the system and know which instance you joined
             // (and copy the state of that instance)
+            JoinMessage jMsg = new JoinMessage(UUID.randomUUID());
+            /**TODO: Add timeout so that he asks another one, OR ask everyone and stop listening to replies after the first on (if State==ACTIVE, that is already joined)?.
+             * By now, we dont want too many messages flowing, so we assume the first host will be fine
+            */
+            Host target = initialMembership.get(0);
+            sendMessage(jMsg, target, channelId);
+            logger.info("{[]} JoinMessage sent from host {} to {}." + jMsg.getMid(), this.self, target);
         }
 
     }
@@ -124,7 +150,8 @@ public class StateMachine extends GenericProtocol {
     private void uponOrderRequest(OrderRequest request, short sourceProto) {
         logger.debug("Received request: " + request);
         if (state == State.JOINING) {
-            //Do something smart (like buffering the requests)
+            //DONE: Do something smart (like buffering the requests)
+            queue.offer(request);
         } else if (state == State.ACTIVE) {
 
             if (currentOrder == null) {
@@ -139,6 +166,16 @@ public class StateMachine extends GenericProtocol {
         	//Maybe you should modify what is it that you are proposing so that you remember that this
         	//operation was issued by the application (and not an internal operation, check the uponDecidedNotification)
         }
+    }
+
+    private void uponCurrentStateReply(CurrentStateReply reply, short sourceProto){
+        logger.info("{} CurrentStateReplyJoin in instance = {}, for joiner = {}, state included", self, reply.getInstance(), reply.getJoiner());
+
+        JoinOKMessage jOkMsg = new JoinOKMessage(UUID.randomUUID(), reply.getInstance(), reply.getState());
+        sendMessage(jOkMsg, reply.getJoiner(), channelId);
+
+        JoinedNotification jNot = new JoinedNotification(this.membership, reply.getInstance());
+        triggerNotification(jNot);
     }
 
     /*--------------------------------- Notifications ---------------------------------------- */
@@ -169,6 +206,24 @@ public class StateMachine extends GenericProtocol {
     private void uponMsgFail(ProtoMessage msg, Host host, short destProto, Throwable throwable, int channelId) {
         //If a message fails to be sent, for whatever reason, log the message and the reason
         logger.error("Message {} to {} failed, reason: {}", msg, host, throwable);
+    }
+
+    private void uponJoinMessage(JoinMessage msg, Host joiner, short sourceProtoId, int channelId) {
+        logger.info("{[]} JoinMessage received from {}", msg.getMid(), joiner);
+        membership.add(joiner);
+        CurrentStateRequest csRequest = new CurrentStateRequest(this.nextInstance, joiner);
+        sendRequest(csRequest, HashApp.PROTO_ID);
+        logger.info("{} CurrentStateRequest for instance {}", self, this.nextInstance);
+    }
+
+    private void uponJoinOKMessage(JoinOKMessage msg, Host from, short sourceProtoId, int channelId){
+        logger.info("{[]} JoinOKMessage received for joiner {}, joined on instance = {}, with state", msg.getMid(), self, msg.getInstance());
+        if(!membership.contains(self))
+            membership.add(self);
+        state = State.ACTIVE;
+        nextInstance = msg.getInstance();
+        InstallStateRequest insReq = new InstallStateRequest(msg.getState());
+        sendRequest(insReq, HashApp.PROTO_ID);
     }
 
     /* --------------------------------- TCPChannel Events ---------------------------- */
