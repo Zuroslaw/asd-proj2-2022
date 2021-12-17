@@ -4,7 +4,6 @@ import java.util.UUID;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.commons.codec.binary.Hex;
-import protocols.app.utils.Operation;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
@@ -12,18 +11,15 @@ import pt.unl.fct.di.novasys.network.ISerializer;
  * This is here just as an example, your solution
  * probably needs to use different message types
  *************************************************/
-public class PrepareOKMessage extends ProtoMessage {
+public class AcceptMessage extends ProtoMessage {
 
     public final static short MSG_ID = 101;
 
     private final UUID opId;
     private final int instance;
-    private final long sequenceNumber;
-    private final long highestAcceptSeq;
-    private final Operation op;
+    private final byte[] op;
 
-
-    public PrepareOKMessage(int instance, UUID opId, Operation op, long sequenceNumber, long highestAcceptSeq) {
+    public AcceptMessage(int instance, UUID opId, byte[] op) {
         super(MSG_ID);
         this.instance = instance;
         this.op = op;
@@ -38,7 +34,7 @@ public class PrepareOKMessage extends ProtoMessage {
         return opId;
     }
 
-    public Operation getOp() {
+    public byte[] getOp() {
         return op;
     }
 
@@ -51,9 +47,9 @@ public class PrepareOKMessage extends ProtoMessage {
                 '}';
     }
 
-    public static ISerializer<PrepareOKMessage> serializer = new ISerializer<PrepareOKMessage>() {
+    public static ISerializer<AcceptMessage> serializer = new ISerializer<AcceptMessage>() {
         @Override
-        public void serialize(PrepareOKMessage msg, ByteBuf out) {
+        public void serialize(AcceptMessage msg, ByteBuf out) {
             out.writeInt(msg.instance);
             out.writeLong(msg.opId.getMostSignificantBits());
             out.writeLong(msg.opId.getLeastSignificantBits());
@@ -62,14 +58,14 @@ public class PrepareOKMessage extends ProtoMessage {
         }
 
         @Override
-        public PrepareOKMessage deserialize(ByteBuf in) {
+        public AcceptMessage deserialize(ByteBuf in) {
             int instance = in.readInt();
             long highBytes = in.readLong();
             long lowBytes = in.readLong();
             UUID opId = new UUID(highBytes, lowBytes);
             byte[] op = new byte[in.readInt()];
             in.readBytes(op);
-            return new PrepareOKMessage(instance, opId, op);
+            return new AcceptMessage(instance, opId, op);
         }
     };
 
