@@ -1,71 +1,70 @@
 package protocols.agreement.messages;
 
-import java.util.UUID;
+import java.io.IOException;
 
 import io.netty.buffer.ByteBuf;
-import org.apache.commons.codec.binary.Hex;
+import protocols.agreement.model.OperationWrapper;
+import protocols.app.utils.Operation;
+import protocols.app.utils.Serializers;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
-/*************************************************
- * This is here just as an example, your solution
- * probably needs to use different message types
- *************************************************/
 public class PrepareOKMessage extends ProtoMessage {
 
     public final static short MSG_ID = 101;
 
-    private final UUID opId;
     private final int instance;
-    private final byte[] op;
+    private final long sequenceNumber;
+    private final long highestAcceptedSeq;
+    private final OperationWrapper highestAcceptedValue;
 
-    public PrepareOKMessage(int instance, UUID opId, byte[] op) {
+    public PrepareOKMessage(int instance, long sequenceNumber, long highestAcceptedSeq, OperationWrapper highestAcceptedValue) {
         super(MSG_ID);
         this.instance = instance;
-        this.op = op;
-        this.opId = opId;
+        this.sequenceNumber = sequenceNumber;
+        this.highestAcceptedSeq = highestAcceptedSeq;
+        this.highestAcceptedValue = highestAcceptedValue;
     }
 
     public int getInstance() {
         return instance;
     }
 
-    public UUID getOpId() {
-        return opId;
+    public long getSequenceNumber() {
+        return sequenceNumber;
     }
 
-    public byte[] getOp() {
-        return op;
+    public long getHighestAcceptedSeq() {
+        return highestAcceptedSeq;
+    }
+
+    public OperationWrapper getHighestAcceptedValue() {
+        return highestAcceptedValue;
     }
 
     @Override
     public String toString() {
         return "BroadcastMessage{" +
-                "opId=" + opId +
                 ", instance=" + instance +
-                ", op=" + Hex.encodeHexString(op) +
                 '}';
     }
 
-    public static ISerializer<PrepareOKMessage> serializer = new ISerializer<PrepareOKMessage>() {
+    public static ISerializer<PrepareOKMessage> serializer = new ISerializer<>() {
         @Override
-        public void serialize(PrepareOKMessage msg, ByteBuf out) {
+        public void serialize(PrepareOKMessage msg, ByteBuf out) throws IOException {
             out.writeInt(msg.instance);
-            out.writeLong(msg.opId.getMostSignificantBits());
-            out.writeLong(msg.opId.getLeastSignificantBits());
-            out.writeInt(msg.op.length);
-            out.writeBytes(msg.op);
+            out.writeLong(msg.sequenceNumber);
+            out.writeLong(msg.highestAcceptedSeq);
+            //todo: Serializers.byteArray.serialize(msg.highestAcceptedValue.toByteArray(), out);
         }
 
         @Override
-        public PrepareOKMessage deserialize(ByteBuf in) {
+        public PrepareOKMessage deserialize(ByteBuf in) throws IOException {
             int instance = in.readInt();
-            long highBytes = in.readLong();
-            long lowBytes = in.readLong();
-            UUID opId = new UUID(highBytes, lowBytes);
-            byte[] op = new byte[in.readInt()];
-            in.readBytes(op);
-            return new PrepareOKMessage(instance, opId, op);
+            long sequenceNumber = in.readLong();
+            long highestAccept = in.readLong();
+            //todo: byte[] operation = Serializers.byteArray.deserialize(in);
+            return new PrepareOKMessage(instance, sequenceNumber, highestAccept, null /*todo*/);
         }
     };
 

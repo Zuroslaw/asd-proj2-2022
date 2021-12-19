@@ -79,7 +79,7 @@ public class IncorrectAgreement extends GenericProtocol {
     private void uponBroadcastMessage(BroadcastMessage msg, Host host, short sourceProto, int channelId) {
         if(joinedInstance >= 0 ){
             //Obviously your agreement protocols will not decide things as soon as you receive the first message
-            triggerNotification(new DecidedNotification(msg.getInstance(), msg.getOpId(), msg.getOp()));
+//            triggerNotification(new DecidedNotification(msg.getInstance(), msg.getOpId(), msg.getOp(), null, host));
         } else {
             //We have not yet received a JoinedNotification, but we are already receiving messages from the other
             //agreement instances, maybe we should do something with them...?

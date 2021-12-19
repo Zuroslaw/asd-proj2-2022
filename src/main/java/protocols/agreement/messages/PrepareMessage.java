@@ -17,29 +17,17 @@ public class PrepareMessage extends ProtoMessage {
 
     public final static short MSG_ID = 101;
 
-    private final UUID opId;
     private final int instance;
-    private final Operation op;
     private long sequenceNumber;
 
-    public PrepareMessage(int instance, UUID opId, Operation op) {
+    public PrepareMessage(int instance, long sequenceNumber) {
         super(MSG_ID);
         this.instance = instance;
-        this.op = op;
-        this.opId = opId;
-        this.sequenceNumber = Calendar.getInstance().getTimeInMillis();
+        this.sequenceNumber = sequenceNumber;
     }
 
     public int getInstance() {
         return instance;
-    }
-
-    public UUID getOpId() {
-        return opId;
-    }
-
-    public Operation getOp() {
-        return op;
     }
 
     public long getSequenceNumber() {
@@ -49,9 +37,7 @@ public class PrepareMessage extends ProtoMessage {
     @Override
     public String toString() {
         return "BroadcastMessage{" +
-                "opId=" + opId +
                 ", instance=" + instance +
-                ", op=" + op +
                 '}';
     }
 
@@ -59,23 +45,14 @@ public class PrepareMessage extends ProtoMessage {
         @Override
         public void serialize(PrepareMessage msg, ByteBuf out) throws IOException{
             out.writeInt(msg.instance);
-            out.writeLong(msg.opId.getMostSignificantBits());
-            out.writeLong(msg.opId.getLeastSignificantBits());
-            //out.writeInt(msg.op.length);
-            out.writeBytes(msg.op.toByteArray()); //had to throw IOException
+            out.writeLong(msg.sequenceNumber);
         }
 
         @Override
         public PrepareMessage deserialize(ByteBuf in) throws IOException {
+            long sequenceNumber = in.readLong();
             int instance = in.readInt();
-            long highBytes = in.readLong();
-            long lowBytes = in.readLong();
-            UUID opId = new UUID(highBytes, lowBytes);
-
-            byte[] op = new byte[in.readInt()];
-            in.readBytes(op);
-            Operation goodOp = Operation.fromByteArray(op); //had to throw IOException
-            return new PrepareMessage(instance, opId, goodOp);
+            return new PrepareMessage(instance, sequenceNumber);
         }
     };
 
