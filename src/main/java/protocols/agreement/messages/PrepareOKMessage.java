@@ -4,7 +4,6 @@ import java.util.UUID;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.commons.codec.binary.Hex;
-import protocols.app.utils.Operation;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
@@ -18,12 +17,9 @@ public class PrepareOKMessage extends ProtoMessage {
 
     private final UUID opId;
     private final int instance;
-    private final long sequenceNumber;
-    private final long highestAcceptSeq;
-    private final Operation op;
+    private final byte[] op;
 
-
-    public PrepareOKMessage(int instance, UUID opId, Operation op, long sequenceNumber, long highestAcceptSeq) {
+    public PrepareOKMessage(int instance, UUID opId, byte[] op) {
         super(MSG_ID);
         this.instance = instance;
         this.op = op;
@@ -38,7 +34,7 @@ public class PrepareOKMessage extends ProtoMessage {
         return opId;
     }
 
-    public Operation getOp() {
+    public byte[] getOp() {
         return op;
     }
 

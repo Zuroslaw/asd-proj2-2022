@@ -8,7 +8,6 @@ import java.util.Properties;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import protocols.agreement.messages.AcceptMessage;
 import protocols.agreement.messages.AcceptOKMessage;
 import protocols.agreement.messages.BroadcastMessage;
 import protocols.agreement.messages.PrepareOKMessage;
@@ -109,88 +108,17 @@ public class Paxos extends GenericProtocol {
         }
     }
 
-    private void uponPrepareMessage(PrepareMessage msg, Host sender, short sourceProto, int channelId) {
+    private void uponPrepareMessage(PrepareMessage msg, Host host, short sourceProto, int channelId) {
         if(joinedInstance >= 0 ){
             if(msg.getSequenceNumber() > highestPrepSeq){
                 highestPrepSeq = msg.getSequenceNumber();
-                PrepareOKMessage prepOKmsg = new PrepareOKMessage(msg.getInstance(), msg.getOpId(),  msg.getSequenceNumber(), highestAcceptSeq, highestOp);
-                sendMessage(prepOKmsg, sender);
+                PrepareOKMessage prepOKmsg = new PrepareOKMessage(msg.getInstance(), msg.getOpId(),  )
             }
         } else {
             //We have not yet received a JoinedNotification, but we are already receiving messages from the other
             //agreement instances, maybe we should do something with them...?
         }
     }
-
-    private void uponPrepareOKMessage(PrepareOKMessage msg, Host host, short sourceProto, int channelId) {
-        if(joinedInstance >= 0 ){
-            if(proposerSeq > msg.getSequenceNumber()){
-                prepareOKSet.add(msg);
-                if(prepareOKSet.size() > ((membership.size() / 2) + 1)){
-                    //{hna, hva} <- Highest(prepareOKSet)
-                    if(highestOp != null)
-                        proposerOp = highestOp;
-                    AcceptMessage acceptMsg = new AcceptMessage(proposerSeq, proposerOp);
-                    for (Host h : membership) {
-                        sendMessage(acceptMsg, h);
-                    }
-                    prepareOKSet.clear();
-                }
-                //TODO: Cancel Timer Timeout
-                //TODO: Setup Timer Timeout (T)
-            }
-        } else {
-            //We have not yet received a JoinedNotification, but we are already receiving messages from the other
-            //agreement instances, maybe we should do something with them...?
-        }
-    }
-
-    private void uponAcceptMessage(AcceptMessage msg, Host host, short sourceProto, int channelId) {
-        if(joinedInstance >= 0 ){
-            if(msg.getSequenceNumber() > highestPrepSeq){
-                highestPrepSeq = msg.getSequenceNumber();
-                highestAcceptSeq = msg.getSequenceNumber();
-                highestOp = msg.getOp();
-                AcceptOKMessage acceptOKMsg = new AcceptOKMessage(msg.getSequenceNumber(), msg.getOp());
-                for (Host h : membership) {
-                    sendMessage(acceptOKMsg, h);
-                }
-            }
-        } else {
-            //We have not yet received a JoinedNotification, but we are already receiving messages from the other
-            //agreement instances, maybe we should do something with them...?
-        }
-    }
-
-    private void uponAcceptOKMessage(AcceptOKMessage msg, Host host, short sourceProto, int channelId) {
-        if(joinedInstance >= 0 ){
-            //if FORALL(hsn, hsv) in AcceptOKSet: hsn = sn AND hv = v THEN
-                acceptOKSet.add(msg); //msg -> {sn, v}
-            //else if EXISTS(hsn,hv) in AcceptOKSet: hsn < sn THEN
-                acceptOKSet.clear();
-                acceptOKSet.add(msg); //msg -> {sn, v}
-            if (decided == null && (acceptOKSet.size() >= ((membership.size() / 2) + 1))){
-                decided = msg.getOp();
-                //triggerNotification(DecidedNotification);
-                if(msg.getSequenceNumber() == proposerSeq)
-                    //Cancel Timer Timeout
-            }
-        } else {
-            //We have not yet received a JoinedNotification, but we are already receiving messages from the other
-            //agreement instances, maybe we should do something with them...?
-        }
-    }
-
-    /** upon Timer Timeout do
-     * {
-     *  if decided == null then
-     *      proposer_seq <- proposer_seq + #allProcesses
-     *      Foreach p in allProcesses do:
-     *          Send PREPARE (p, proposer_seq)
-     *      prepareOKSet.clear()
-     *      setup timer TImeout (T)
-     * }
-     */
 
     private void uponJoinedNotification(JoinedNotification notification, short sourceProto) {
         //We joined the system and can now start doing things
