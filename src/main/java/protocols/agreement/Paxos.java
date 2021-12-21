@@ -21,13 +21,6 @@ import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.data.Host;
 
-/**
- * This is NOT a correct agreement protocol (it is actually a VERY wrong one)
- * This is simply an example of things you can do, and can be used as a starting point.
- *
- * You are free to change/delete ANYTHING in this class, including its fields.
- * Do not assume that any logic implemented here is correct, think for yourself!
- */
 public class Paxos extends GenericProtocol {
 
     private static final Logger logger = LogManager.getLogger(Paxos.class);
@@ -43,7 +36,23 @@ public class Paxos extends GenericProtocol {
     private Map<Integer, InstanceState> instances;
     private Map<Integer, Long> instanceToTimerId;
     private Set<Host> newestMembership;
-    private long initialSequenceNumber; // todo it should be 0,1,2,3 ... ? passed by state machine?
+
+    /** questions for initialSequenceNumber:
+     *      current solution:
+     *          private Calendar cal = Calendar.getInstance();
+     *          long InitialSequenceNumber = cal.getTimeInMillis();
+     *
+     *  the ideal solution would be if we had a Singleton instance of a SequenceNumberGenerator at StateMachine level, so that Paxos replicas could call this
+     *  instance of SequenceNumberGenerator from their State Machine instance and get their sequence number by this generator without the need of StateMachine .
+     *  to parse the parameter.
+     *
+     *  Problem 1: This is not a solution if different processes must have different sequence number, that is, if every replica in the network (every process)
+     *  must have a higher sequence number than any other that has been before in the whole network
+     *
+     *  Question 2: Does each State Machine instance have a lot of Paxos replicas (instances?) in their "property" or each instance of the
+     *  State Machine is one replica?
+     */
+    private long initialSequenceNumber; // todo it should be 0,1,2,3 ... ? passed by state machine?0
     private Map<Integer, Queue<Runnable>> messageQueues;
 
 
@@ -62,6 +71,12 @@ public class Paxos extends GenericProtocol {
         /*--------------------- Register Notification Handlers ----------------------------- */
         subscribeNotification(ChannelReadyNotification.NOTIFICATION_ID, this::uponChannelCreated);
         subscribeNotification(JoinedNotification.NOTIFICATION_ID, this::uponJoinedNotification);
+
+        /*--------------------- Register Message Handlers -----------------------------------------*/
+        registerMessageHandler(PrepareMessage.MSG_ID, this::uponPrepareMessage);
+        registerMessageHandler(PrepareOKMessage.MSG_ID, this::uponPrepareOKMessage);
+        registerMessageHandler(AcceptMessage.MSG_ID, this::uponAcceptMessage);
+        registerMessageHandler(AcceptOkMessage.MSG_ID, this::uponAcceptOkMessage);
     }
 
     @Override
