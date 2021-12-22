@@ -83,6 +83,11 @@ public class HashApp extends GenericProtocol {
         registerRequestHandler(CurrentStateRequest.REQUEST_ID, this::uponCurrentStateRequest);
         registerRequestHandler(InstallStateRequest.REQUEST_ID, this::uponInstallStateRequest);
 
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            logger.info("Current state N_OPS= {}, MAP_SIZE={}, HASH={}",
+                    executedOps, data.size(), Hex.encodeHexString(cumulativeHash));
+        }));
+
     }
 
     @Override

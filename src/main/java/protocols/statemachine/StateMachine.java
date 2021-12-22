@@ -128,7 +128,7 @@ public class StateMachine extends GenericProtocol {
         int myIndex = initialMembership.indexOf(self);
         if (myIndex != -1) {
             state = State.ACTIVE;
-            highestSequenceNumber = initialMembership.size();
+            highestSequenceNumber = initialMembership.size() - 1;
             logger.info("Starting in ACTIVE as I am part of initial membership");
             logger.info("My sequence number: {}", myIndex);
             //I'm part of the initial membership, so I'm assuming the system is bootstrapping
@@ -138,13 +138,17 @@ public class StateMachine extends GenericProtocol {
         } else {
             state = State.JOINING;
             logger.info("Starting in JOINING as I am not part of initial membership");
+            contactNode = initialMembership.get(0);
+            openConnection(contactNode, channelId);
             JoinMessage jMsg = new JoinMessage(UUID.randomUUID());
-            Host target = initialMembership.get(0);
-            sendMessage(jMsg, target, channelId);
-            logger.info("{[]} JoinMessage sent from host {} to {}." + jMsg.getMid(), this.self, target);
+            sendMessage(channelId, jMsg, contactNode);
+            logger.info("JoinMessage sent from host {} to {}.", this.self, contactNode);
+            contactNode = null;
         }
 
     }
+
+    private Host contactNode;
 
     /*--------------------------------- Requests ---------------------------------------- */
     private void uponOrderRequest(OrderRequest request, short sourceProto) {
@@ -170,13 +174,14 @@ public class StateMachine extends GenericProtocol {
 
     private void uponCurrentStateReply(CurrentStateReply reply, short sourceProto){
         JoinOKMessage jOkMsg = new JoinOKMessage(UUID.randomUUID(), reply.getInstance(), reply.getState(), membership, ++highestSequenceNumber);
-        sendMessage(jOkMsg, reply.getJoiner(), channelId);
+        sendMessage(jOkMsg, reply.getJoiner());
     }
 
     List<DecidedNotification> toExecute = new LinkedList<>();
 
     private void handleAddReplica(DecidedNotification notification) {
         membership.add(notification.getOperation().getHost());
+        openConnection(notification.getOperation().getHost(), channelId);
         if (hostsWaitingToJoin.contains(notification.getOperation().getHost())) {
             CurrentStateRequest request = new CurrentStateRequest(notification.getInstance(), notification.getOperation().getHost());
             sendRequest(request, HashApp.PROTO_ID);
@@ -253,6 +258,8 @@ public class StateMachine extends GenericProtocol {
                 logger.debug("Queue contains another operation. Proposing.");
                 sendRequest(new ProposeRequest(currentInstance, membership, currentOperation),
                         Paxos.PROTOCOL_ID);
+            } else {
+                logger.debug("Queue empty. Going idle.");
             }
         } else {
             logger.debug("Executed operation was NOT mine. Proposing my operation again.");
@@ -265,16 +272,17 @@ public class StateMachine extends GenericProtocol {
     private void uponMsgFail(ProtoMessage msg, Host host, short destProto, Throwable throwable, int channelId) {
         //If a message fails to be sent, for whatever reason, log the message and the reason
         logger.error("Message {} to {} failed, reason: {}", msg, host, throwable);
+        throwable.printStackTrace();
     }
 
     private final Set<Host> hostsWaitingToJoin = new HashSet<>();
 
     private void uponJoinMessage(JoinMessage msg, Host joiner, short sourceProtoId, int channelId) {
         hostsWaitingToJoin.add(joiner);
-        OperationWrapper operation = new OperationWrapper(currentOperation.getOpId(), OpType.ADD_REPLICA, currentOperation.getOperation(), null);
+        OperationWrapper operation = new OperationWrapper(UUID.randomUUID(), OpType.ADD_REPLICA, null, joiner);
 
         if (currentOperation == null) {
-            sendRequest(new ProposeRequest(++currentInstance, membership, operation),
+            sendRequest(new ProposeRequest(currentInstance, membership, operation),
                     Paxos.PROTOCOL_ID);
         } else {
             queue.offer(operation);
@@ -283,11 +291,12 @@ public class StateMachine extends GenericProtocol {
 
     private void uponJoinOKMessage(JoinOKMessage msg, Host from, short sourceProtoId, int channelId){
         membership = msg.getMembership();
+        membership.forEach(this::openConnection);
         highestSequenceNumber = msg.getSequenceNumber();
         currentInstance = msg.getInstance() + 1;
         InstallStateRequest insReq = new InstallStateRequest(msg.getState());
         sendRequest(insReq, HashApp.PROTO_ID);
-        JoinedNotification joinedNotification = new JoinedNotification(currentInstance, highestSequenceNumber);
+        JoinedNotification joinedNotification = new JoinedNotification(msg.getInstance(), highestSequenceNumber);
         triggerNotification(joinedNotification);
         state = State.ACTIVE;
     }
@@ -307,7 +316,7 @@ public class StateMachine extends GenericProtocol {
         //Also, maybe wait a little bit before retrying, or else you'll be trying 1000s of times per second
         if(membership.contains(event.getNode())) {
             try {
-                Thread.sleep(1000);
+                Thread.sleep(1000); //todo
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
@@ -316,11 +325,11 @@ public class StateMachine extends GenericProtocol {
     }
 
     private void uponInConnectionUp(InConnectionUp event, int channelId) {
-        logger.trace("Connection from {} is up", event.getNode());
+        logger.debug("Connection from {} is up", event.getNode());
     }
 
     private void uponInConnectionDown(InConnectionDown event, int channelId) {
-        logger.trace("Connection from {} is down, cause: {}", event.getNode(), event.getCause());
+        logger.debug("Connection from {} is down, cause: {}", event.getNode(), event.getCause());
     }
 
 }

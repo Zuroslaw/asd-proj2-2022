@@ -74,7 +74,7 @@ public class Paxos extends GenericProtocol {
         instances.put(instance, instanceState);
 
         PrepareMessage msg = new PrepareMessage(instance, instanceState.getProposerSeq());
-        logger.debug("Sending prepare message to all processes: {}", msg);
+        logger.debug("Sending prepare message to all processes [{}]: {}", instanceState.getAllProcesses(), msg);
         instanceState.getAllProcesses()
                 .forEach(host -> sendMessage(msg, host));
         long timerId = setupTimer(new TimeoutTimer(instance), TIMEOUT);
@@ -87,6 +87,7 @@ public class Paxos extends GenericProtocol {
 
     private void uponPrepareMessage(PrepareMessage msg, Host host, short sourceProto, int channelId) {
         if (shouldNotParticipate(msg.getInstance())) {
+            logger.debug("I should not participate in this instance, ignoring msg from [{}]: {}", host, msg);
             return;
         }
         logger.debug("Handling prepare message from [{}]: {}", host, msg);
@@ -109,6 +110,7 @@ public class Paxos extends GenericProtocol {
 
     private void uponPrepareOkMessage(PrepareOKMessage msg, Host host, short sourceProto, int channelId) {
         if (shouldNotParticipate(msg.getInstance())) {
+            logger.debug("I should not participate in this instance, ignoring msg from [{}]: {}", host, msg);
             return;
         }
         logger.debug("Handling prepareOk message from [{}]: {}", host, msg);
@@ -124,7 +126,7 @@ public class Paxos extends GenericProtocol {
                     instance.setProposerValue(highest.getHighestAcceptedValue());
                 }
                 AcceptMessage accept = new AcceptMessage(msg.getInstance(), instance.getProposerSeq(), instance.getProposerValue(), instance.getAllProcesses());
-                logger.debug("Sending accept to all processes: {}", accept);
+                logger.debug("Sending accept to all processes [{}]: {}", instance.getAllProcesses(), accept);
                 instance.getAllProcesses()
                         .forEach(p -> sendMessage(accept, p));
                 instance.setPrepareOkSet(new LinkedList<>());
@@ -137,6 +139,7 @@ public class Paxos extends GenericProtocol {
 
     private void uponAcceptMessage(AcceptMessage msg, Host host, short sourceProto, int channelId) {
         if (shouldNotParticipate(msg.getInstance())) {
+            logger.debug("I should not participate in this instance, ignoring msg from [{}]: {}", host, msg);
             return;
         }
         logger.debug("Handling accept message from [{}]: {}", host, msg);
@@ -154,14 +157,17 @@ public class Paxos extends GenericProtocol {
             instance.setHighestAccept(msg.getSequenceNumber());
             instance.setHighestValue(msg.getValue());
             AcceptOkMessage acceptOk = new AcceptOkMessage(msg.getInstance(), msg.getSequenceNumber(), msg.getValue(), instance.getAllProcesses());
-            logger.debug("Sending AcceptOk to all processes: {}", acceptOk);
+            logger.debug("Sending AcceptOk to all processes [{}]: {}", instance.getAllProcesses(), acceptOk);
             instance.getAllProcesses()
                     .forEach(p -> sendMessage(acceptOk, p));
+        } else {
+            logger.debug("Sequence number is lower then what I promised to accept, discarding message.");
         }
     }
 
     private void uponAcceptOkMessage(AcceptOkMessage msg, Host host, short sourceProto, int channelId) {
         if (shouldNotParticipate(msg.getInstance())) {
+            logger.debug("I should not participate in this instance, ignoring msg from [{}]: {}", host, msg);
             return;
         }
         logger.debug("Handling acceptOk message from [{}]: {}", host, msg);
