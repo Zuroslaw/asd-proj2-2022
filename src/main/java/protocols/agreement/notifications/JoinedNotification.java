@@ -4,33 +4,33 @@ import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.List;
+import java.util.Set;
 
 public class JoinedNotification extends ProtoNotification {
 
-    public static final short NOTIFICATION_ID = 102;
+    public static final short NOTIFICATION_ID = 106;
 
-    private final List<Host> membership;
     private final int joinInstance;
+    private final long sequenceNumber;
 
-    public JoinedNotification(List<Host> membership, int joinInstance) {
+    public JoinedNotification(int joinInstance, long sequenceNumber) {
         super(NOTIFICATION_ID);
-        this.membership = membership;
         this.joinInstance = joinInstance;
+        this.sequenceNumber = sequenceNumber;
     }
 
     public int getJoinInstance() {
         return joinInstance;
     }
 
-    public List<Host> getMembership() {
-        return membership;
-    }
-
     @Override
     public String toString() {
         return "JoinedNotification{" +
-                "membership=" + membership +
                 ", joinInstance=" + joinInstance +
                 '}';
+    }
+
+    public long getSequenceNumber() {
+        return sequenceNumber;
     }
 }

@@ -1,11 +1,7 @@
 package protocols.agreement.messages;
 
-import java.io.IOException;
-import java.util.Calendar;
-import java.util.UUID;
 
 import io.netty.buffer.ByteBuf;
-import protocols.app.utils.Operation;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
@@ -15,10 +11,10 @@ import pt.unl.fct.di.novasys.network.ISerializer;
  *************************************************/
 public class PrepareMessage extends ProtoMessage {
 
-    public final static short MSG_ID = 101;
+    public final static short MSG_ID = 103;
 
     private final int instance;
-    private long sequenceNumber;
+    private final long sequenceNumber;
 
     public PrepareMessage(int instance, long sequenceNumber) {
         super(MSG_ID);
@@ -36,22 +32,23 @@ public class PrepareMessage extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "BroadcastMessage{" +
-                ", instance=" + instance +
+        return "PrepareMessage{" +
+                "instance=" + instance +
+                ", sequenceNumber=" + sequenceNumber +
                 '}';
     }
 
-    public static ISerializer<PrepareMessage> serializer = new ISerializer<PrepareMessage>(){
+    public static ISerializer<PrepareMessage> serializer = new ISerializer<>(){
         @Override
-        public void serialize(PrepareMessage msg, ByteBuf out) throws IOException{
+        public void serialize(PrepareMessage msg, ByteBuf out) {
             out.writeInt(msg.instance);
             out.writeLong(msg.sequenceNumber);
         }
 
         @Override
-        public PrepareMessage deserialize(ByteBuf in) throws IOException {
-            long sequenceNumber = in.readLong();
+        public PrepareMessage deserialize(ByteBuf in) {
             int instance = in.readInt();
+            long sequenceNumber = in.readLong();
             return new PrepareMessage(instance, sequenceNumber);
         }
     };

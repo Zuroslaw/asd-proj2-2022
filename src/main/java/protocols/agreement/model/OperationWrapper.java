@@ -1,7 +1,12 @@
 package protocols.agreement.model;
 
+import io.netty.buffer.ByteBuf;
+import protocols.util.Serializers;
+import pt.unl.fct.di.novasys.network.ISerializer;
 import pt.unl.fct.di.novasys.network.data.Host;
 
+import java.io.IOException;
+import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -16,6 +21,10 @@ public class OperationWrapper {
         this.opType = opType;
         this.operation = operation;
         this.host = host;
+    }
+
+    public static OperationWrapper nullOperation() {
+        return new OperationWrapper(null, OpType.NULL, null, null);
     }
 
     public UUID getOpId() {
@@ -39,6 +48,15 @@ public class OperationWrapper {
     }
 
     @Override
+    public String toString() {
+        return "OperationWrapper{" +
+                "opId=" + opId +
+                ", opType=" + opType +
+                ", host=" + host +
+                '}';
+    }
+
+    @Override
     public int hashCode() {
         return Objects.hash(opId);
     }
@@ -46,4 +64,24 @@ public class OperationWrapper {
     public Host getHost() {
         return host;
     }
+
+    public static ISerializer<OperationWrapper> serializer = new ISerializer<>() {
+        @Override
+        public void serialize(OperationWrapper obj, ByteBuf out) throws IOException {
+            Serializers.nullable(Serializers.uuid).serialize(obj.opId, out);
+            out.writeInt(obj.opType.ordinal());
+            Serializers.nullable(Serializers.byteArray).serialize(obj.operation, out);
+            Serializers.nullable(Host.serializer).serialize(obj.host, out);
+        }
+
+        @Override
+        public OperationWrapper deserialize(ByteBuf in) throws IOException {
+            UUID uuid = Serializers.nullable(Serializers.uuid).deserialize(in);
+            int opTypeOrdinal = in.readInt();
+            OpType opType = OpType.values()[opTypeOrdinal];
+            byte[] operation = Serializers.nullable(Serializers.byteArray).deserialize(in);
+            Host host = Serializers.nullable(Host.serializer).deserialize(in);
+            return new OperationWrapper(uuid, opType, operation, host);
+        }
+    };
 }

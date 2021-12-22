@@ -7,7 +7,7 @@ import java.util.UUID;
 
 public class OrderRequest extends ProtoRequest {
 
-    public static final short REQUEST_ID = 221;
+    public static final short REQUEST_ID = 220;
 
     private final UUID opId;
     private final byte[] operation;

@@ -1,29 +1,34 @@
 package protocols.statemachine.messages;
 
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 import io.netty.buffer.ByteBuf;
-import org.apache.commons.codec.binary.Hex;
-import protocols.agreement.messages.BroadcastMessage;
+import protocols.util.Serializers;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 public class JoinOKMessage extends ProtoMessage {
-    public final static short MSG_ID = 212;
+    public final static short MSG_ID = 202;
 
-    //private final UUID opId;
+    private final UUID mid;
+    private final byte[] state;
     private final int instance;
-    //private final byte[] op;
-    private UUID mid;
-    private byte[] state;
+    private final Set<Host> membership;
+    private final long sequenceNumber;
 
-    public JoinOKMessage(UUID mid, int instance, byte[] state){
+    public JoinOKMessage(UUID mid, int instance, byte[] state, Set<Host> membership, long sequenceNumber){
         super(MSG_ID);
         this.mid = mid;
         this.instance = instance;
-        //this.op = op;
-        //this.opId = opId;
         this.state = state;
+        this.membership = membership;
+        this.sequenceNumber = sequenceNumber;
     }
 
     public UUID getMid() {
@@ -37,43 +42,44 @@ public class JoinOKMessage extends ProtoMessage {
     public byte[] getState() {
         return state;
     }
-/**
-    public UUID getOpId() {
-     return opId;
-     }
 
-     public byte[] getOp() {
-     return op;
-     }
-     */
+    public Set<Host> getMembership() {
+        return membership;
+    }
+
+    public long getSequenceNumber() {
+        return sequenceNumber;
+    }
+
     @Override
     public String toString() {
         return "JoinOKMessage{" +
-                "mid = " + this.mid +
-                "instance = " + this.instance +
-                "state included" +
+                "mid=" + mid +
+                ", state=" + Arrays.toString(state) +
+                ", instance=" + instance +
+                ", membership=" + membership +
+                ", sequenceNumber=" + sequenceNumber +
                 '}';
     }
 
     public static ISerializer<JoinOKMessage> serializer = new ISerializer<JoinOKMessage>() {
         @Override
-        public void serialize(JoinOKMessage msg, ByteBuf out) {
-            out.writeInt(msg.instance);
-            out.writeLong(msg.mid.getMostSignificantBits());
-            out.writeLong(msg.mid.getLeastSignificantBits());
-            out.writeInt(msg.state.length);
-            out.writeBytes(msg.state);
+        public void serialize(JoinOKMessage msg, ByteBuf out) throws IOException {
+            Serializers.uuid.serialize(msg.getMid(), out);
+            Serializers.byteArray.serialize(msg.getState(), out);
+            out.writeInt(msg.getInstance());
+            Serializers.hashSet(Host.serializer).serialize(msg.getMembership(), out);
+            out.writeLong(msg.getSequenceNumber());
         }
 
         @Override
-        public JoinOKMessage deserialize(ByteBuf in) {
+        public JoinOKMessage deserialize(ByteBuf in) throws IOException {
+            UUID mid = Serializers.uuid.deserialize(in);
+            byte[] state = Serializers.byteArray.deserialize(in);
             int instance = in.readInt();
-            long highBytes = in.readLong();
-            long lowBytes = in.readLong();
-            UUID mid = new UUID(highBytes, lowBytes);
-            byte[] state = new byte[in.readInt()];
-            in.readBytes(state);
-            return new JoinOKMessage(mid, instance, state);
+            Set<Host> membership = Serializers.hashSet(Host.serializer).deserialize(in);
+            long sequenceNumber = in.readLong();
+            return new JoinOKMessage(mid, instance, state, membership, sequenceNumber);
         }
     };
 }

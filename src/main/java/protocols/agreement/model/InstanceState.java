@@ -2,7 +2,6 @@ package protocols.agreement.model;
 
 import protocols.agreement.messages.AcceptOkMessage;
 import protocols.agreement.messages.PrepareOKMessage;
-import protocols.app.utils.Operation;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.HashSet;
@@ -11,11 +10,11 @@ import java.util.List;
 import java.util.Set;
 
 public class InstanceState {
-    private OperationWrapper proposerValue;
+    private OperationWrapper proposerValue = OperationWrapper.nullOperation();
     private long proposerSeq;
-    private long highestPrepare;
-    private long highestAccept;
-    private OperationWrapper highestValue;
+    private long highestPrepare = -1;
+    private long highestAccept = -1;
+    private OperationWrapper highestValue = OperationWrapper.nullOperation();
     private List<PrepareOKMessage> prepareOkSet = new LinkedList<>(); //set of PrepareOKMessages (with current sequence number)
     private List<AcceptOkMessage> acceptOkSet = new LinkedList<>(); //set of AcceptOKMessages (with the highest sequence number)
     private OperationWrapper decided; //locally decided op

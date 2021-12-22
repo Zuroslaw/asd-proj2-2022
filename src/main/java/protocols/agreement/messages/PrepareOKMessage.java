@@ -4,14 +4,13 @@ import java.io.IOException;
 
 import io.netty.buffer.ByteBuf;
 import protocols.agreement.model.OperationWrapper;
-import protocols.app.utils.Operation;
-import protocols.app.utils.Serializers;
+import protocols.util.Serializers;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
 public class PrepareOKMessage extends ProtoMessage {
 
-    public final static short MSG_ID = 101;
+    public final static short MSG_ID = 104;
 
     private final int instance;
     private final long sequenceNumber;
@@ -44,8 +43,11 @@ public class PrepareOKMessage extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "BroadcastMessage{" +
-                ", instance=" + instance +
+        return "PrepareOKMessage{" +
+                "instance=" + instance +
+                ", sequenceNumber=" + sequenceNumber +
+                ", highestAcceptedSeq=" + highestAcceptedSeq +
+                ", highestAcceptedValue=" + highestAcceptedValue +
                 '}';
     }
 
@@ -55,7 +57,7 @@ public class PrepareOKMessage extends ProtoMessage {
             out.writeInt(msg.instance);
             out.writeLong(msg.sequenceNumber);
             out.writeLong(msg.highestAcceptedSeq);
-            //todo: Serializers.byteArray.serialize(msg.highestAcceptedValue.toByteArray(), out);
+            Serializers.nullable(OperationWrapper.serializer).serialize(msg.getHighestAcceptedValue(), out);
         }
 
         @Override
@@ -63,8 +65,8 @@ public class PrepareOKMessage extends ProtoMessage {
             int instance = in.readInt();
             long sequenceNumber = in.readLong();
             long highestAccept = in.readLong();
-            //todo: byte[] operation = Serializers.byteArray.deserialize(in);
-            return new PrepareOKMessage(instance, sequenceNumber, highestAccept, null /*todo*/);
+            OperationWrapper highestAcceptedValue = Serializers.nullable(OperationWrapper.serializer).deserialize(in);
+            return new PrepareOKMessage(instance, sequenceNumber, highestAccept, highestAcceptedValue);
         }
     };
 

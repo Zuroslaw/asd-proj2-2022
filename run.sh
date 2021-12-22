@@ -1,0 +1,1 @@
+java -jar ./target/asdProj2.jar server_port=500$1 p2p_port=400$1

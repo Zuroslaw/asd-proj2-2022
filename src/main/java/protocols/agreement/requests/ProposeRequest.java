@@ -1,21 +1,23 @@
 package protocols.agreement.requests;
 
+import protocols.agreement.model.OperationWrapper;
 import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
+import pt.unl.fct.di.novasys.network.data.Host;
 
-import java.util.UUID;
+import java.util.Set;
 
 public class ProposeRequest extends ProtoRequest {
 
-    public static final short REQUEST_ID = 101;
+    public static final short REQUEST_ID = 107;
 
     private final int instance;
-    private final UUID opId;
-    private final byte[] operation;
+    private final Set<Host> membership;
+    private final OperationWrapper operation;
 
-    public ProposeRequest(int instance, UUID opId, byte[] operation) {
+    public ProposeRequest(int instance, Set<Host> membership, OperationWrapper operation) {
         super(REQUEST_ID);
         this.instance = instance;
-        this.opId = opId;
+        this.membership = membership;
         this.operation = operation;
     }
 
@@ -23,20 +25,20 @@ public class ProposeRequest extends ProtoRequest {
         return instance;
     }
 
-    public byte[] getOperation() {
+    public OperationWrapper getOperation() {
         return operation;
-    }
-
-    public UUID getOpId() {
-        return opId;
     }
 
     @Override
     public String toString() {
         return "ProposeRequest{" +
                 "instance=" + instance +
-                ", opId=" + opId +
+                ", membership=" + membership +
                 ", operation=" + operation +
                 '}';
+    }
+
+    public Set<Host> getMembership() {
+        return membership;
     }
 }

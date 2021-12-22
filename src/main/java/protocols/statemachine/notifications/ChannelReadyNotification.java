@@ -5,7 +5,7 @@ import pt.unl.fct.di.novasys.network.data.Host;
 
 public class ChannelReadyNotification extends ProtoNotification {
 
-    public static final short NOTIFICATION_ID = 201;
+    public static final short NOTIFICATION_ID = 211;
 
     private final int channelId;
     private final Host myself;

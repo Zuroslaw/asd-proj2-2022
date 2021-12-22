@@ -4,7 +4,7 @@ import pt.unl.fct.di.novasys.babel.generic.ProtoTimer;
 
 public class TimeoutTimer extends ProtoTimer {
 
-    public static final short TIMER_ID = 301;
+    public static final short TIMER_ID = 108;
 
     private final int instance;
 

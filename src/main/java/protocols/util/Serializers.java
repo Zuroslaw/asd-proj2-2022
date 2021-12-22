@@ -1,15 +1,37 @@
-package protocols.app.utils;
+package protocols.util;
 
 import io.netty.buffer.ByteBuf;
 import pt.unl.fct.di.novasys.network.ISerializer;
-import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
-import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 public class Serializers {
+
+    public static <T> ISerializer<Set<T>> hashSet(ISerializer<T> elementSerializer) {
+        return new ISerializer<>() {
+            @Override
+            public void serialize(Set<T> collection, ByteBuf out) throws IOException {
+                out.writeInt(collection.size());
+                for (T element : collection) {
+                    elementSerializer.serialize(element, out);
+                }
+            }
+
+            @Override
+            public Set<T> deserialize(ByteBuf in) throws IOException {
+                int size = in.readInt();
+                Set<T> set = new HashSet<>();
+                for (int i = 0; i < size; i++) {
+                    set.add(elementSerializer.deserialize(in));
+                }
+                return set;
+            }
+        };
+    }
 
     public static <T> ISerializer<T> nullable(ISerializer<T> serializer) {
         return new ISerializer<>() {

@@ -1,9 +1,10 @@
 package protocols.statemachine;
 
+import protocols.agreement.Paxos;
+import protocols.agreement.model.OpType;
+import protocols.agreement.model.OperationWrapper;
 import protocols.agreement.notifications.JoinedNotification;
 import protocols.app.HashApp;
-import protocols.app.messages.RequestMessage;
-import protocols.app.messages.ResponseMessage;
 import protocols.app.requests.CurrentStateReply;
 import protocols.app.requests.CurrentStateRequest;
 import protocols.app.requests.InstallStateRequest;
@@ -17,7 +18,6 @@ import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import pt.unl.fct.di.novasys.network.data.Host;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import protocols.agreement.IncorrectAgreement;
 import protocols.statemachine.notifications.ChannelReadyNotification;
 import protocols.agreement.notifications.DecidedNotification;
 import protocols.agreement.requests.ProposeRequest;
@@ -43,6 +43,10 @@ import java.util.*;
 public class StateMachine extends GenericProtocol {
     private static final Logger logger = LogManager.getLogger(StateMachine.class);
 
+    public List<Integer> getMyOpsExecuted() {
+        return myOpsExecuted;
+    }
+
     private enum State {JOINING, ACTIVE}
 
     //Protocol information, to register in babel
@@ -53,14 +57,15 @@ public class StateMachine extends GenericProtocol {
     private final int channelId; //Id of the created channel
 
     private State state;
-    private List<Host> membership;
-    private int nextInstance;
+    private Set<Host> membership;
+    private int currentInstance;
+    private OperationWrapper currentOperation = null;
 
-    private Queue<OrderRequest> queue = new LinkedList<>();
+    private final Queue<OperationWrapper> queue = new LinkedList<>();
 
     public StateMachine(Properties props) throws IOException, HandlerRegistrationException {
         super(PROTOCOL_NAME, PROTOCOL_ID);
-        nextInstance = 0;
+        currentInstance = 1;
 
         String address = props.getProperty("address");
         String port = props.getProperty("p2p_port");
@@ -90,8 +95,8 @@ public class StateMachine extends GenericProtocol {
         registerReplyHandler(CurrentStateReply.REQUEST_ID, this::uponCurrentStateReply);
 
         /*--------------------- Register Message Handlers ----------------------------- */
-        registerMessageHandler(channelId, JoinMessage.MSG_ID, this::uponJoinMessage);
-        registerMessageHandler(channelId, JoinOKMessage.MSG_ID, this::uponJoinOKMessage);
+        registerMessageHandler(channelId, JoinMessage.MSG_ID, this::uponJoinMessage, this::uponMsgFail);
+        registerMessageHandler(channelId, JoinOKMessage.MSG_ID, this::uponJoinOKMessage, this::uponMsgFail);
 
         /*--------------------- Register Notification Handlers ----------------------------- */
         subscribeNotification(DecidedNotification.NOTIFICATION_ID, this::uponDecidedNotification);
@@ -120,22 +125,20 @@ public class StateMachine extends GenericProtocol {
             initialMembership.add(h);
         }
 
-        if (initialMembership.contains(self)) {
+        int myIndex = initialMembership.indexOf(self);
+        if (myIndex != -1) {
             state = State.ACTIVE;
+            highestSequenceNumber = initialMembership.size();
             logger.info("Starting in ACTIVE as I am part of initial membership");
+            logger.info("My sequence number: {}", myIndex);
             //I'm part of the initial membership, so I'm assuming the system is bootstrapping
-            membership = new LinkedList<>(initialMembership);
+            membership = new HashSet<>(initialMembership);
             membership.forEach(this::openConnection);
-            triggerNotification(new JoinedNotification(membership, 0));
+            triggerNotification(new JoinedNotification(0, myIndex));
         } else {
             state = State.JOINING;
             logger.info("Starting in JOINING as I am not part of initial membership");
-            //You have to do something to join the system and know which instance you joined
-            // (and copy the state of that instance)
             JoinMessage jMsg = new JoinMessage(UUID.randomUUID());
-            /**TODO: Add timeout so that he asks another one, OR ask everyone and stop listening to replies after the first on (if State==ACTIVE, that is already joined)?.
-             * By now, we dont want too many messages flowing, so we assume the first host will be fine
-            */
             Host target = initialMembership.get(0);
             sendMessage(jMsg, target, channelId);
             logger.info("{[]} JoinMessage sent from host {} to {}." + jMsg.getMid(), this.self, target);
@@ -143,40 +146,83 @@ public class StateMachine extends GenericProtocol {
 
     }
 
-    private final Set<UUID> internalOperationsIds = new HashSet<>();
-    private OrderRequest currentOrder = null;
-
     /*--------------------------------- Requests ---------------------------------------- */
     private void uponOrderRequest(OrderRequest request, short sourceProto) {
         logger.debug("Received request: " + request);
+        OperationWrapper operation = new OperationWrapper(request.getOpId(), OpType.CLIENT_REQUEST, request.getOperation(), null);
         if (state == State.JOINING) {
-            //DONE: Do something smart (like buffering the requests)
-            queue.offer(request);
+            logger.debug("I did not join yet, queueing the operation.");
+            queue.offer(operation);
         } else if (state == State.ACTIVE) {
-
-            if (currentOrder == null) {
-                sendRequest(new ProposeRequest(nextInstance++, request.getOpId(), request.getOperation()),
-                        IncorrectAgreement.PROTOCOL_ID);
-                currentOrder = request;
+            if (currentOperation == null) {
+                logger.debug("Proposing the order in current instance.");
+                sendRequest(new ProposeRequest(currentInstance, membership, operation),
+                        Paxos.PROTOCOL_ID);
+                currentOperation = operation;
             } else {
-                queue.offer(request);
+                logger.debug("Queueing operation, because I'm already waiting for previous proposal to be decided.");
+                queue.offer(operation);
             }
-
-            //Also do something starter, we don't want an infinite number of instances active
-        	//Maybe you should modify what is it that you are proposing so that you remember that this
-        	//operation was issued by the application (and not an internal operation, check the uponDecidedNotification)
         }
     }
 
+    private long highestSequenceNumber;
+
     private void uponCurrentStateReply(CurrentStateReply reply, short sourceProto){
-        logger.info("{} CurrentStateReplyJoin in instance = {}, for joiner = {}, state included", self, reply.getInstance(), reply.getJoiner());
-
-        JoinOKMessage jOkMsg = new JoinOKMessage(UUID.randomUUID(), reply.getInstance(), reply.getState());
+        JoinOKMessage jOkMsg = new JoinOKMessage(UUID.randomUUID(), reply.getInstance(), reply.getState(), membership, ++highestSequenceNumber);
         sendMessage(jOkMsg, reply.getJoiner(), channelId);
-
-        JoinedNotification jNot = new JoinedNotification(this.membership, reply.getInstance());
-        triggerNotification(jNot);
     }
+
+    List<DecidedNotification> toExecute = new LinkedList<>();
+
+    private void handleAddReplica(DecidedNotification notification) {
+        membership.add(notification.getOperation().getHost());
+        if (hostsWaitingToJoin.contains(notification.getOperation().getHost())) {
+            CurrentStateRequest request = new CurrentStateRequest(notification.getInstance(), notification.getOperation().getHost());
+            sendRequest(request, HashApp.PROTO_ID);
+        }
+    }
+
+    private void handleRemoveReplica(DecidedNotification notification) {
+        membership.remove(notification.getOperation().getHost());
+        if (notification.getOperation().getHost().equals(self)) {
+            //todo: handle joining again
+        }
+    }
+
+    private void execute(DecidedNotification notification) {
+        OperationWrapper operation = notification.getOperation();
+        switch (operation.getOpType()) {
+            case NULL:
+                break;
+            case CLIENT_REQUEST:
+                logger.debug("Client request operation decided. Sending execute back to App");
+                triggerNotification(new ExecuteNotification(operation.getOpId(), operation.getOperation()));
+                break;
+            case ADD_REPLICA:
+                handleAddReplica(notification);
+                break;
+            case REMOVE_REPLICA:
+                handleRemoveReplica(notification);
+        }
+        currentInstance++;
+    }
+
+    private void executePending() { // todo refactor
+        toExecute.sort(Comparator.comparing(DecidedNotification::getInstance));
+        List<DecidedNotification> stillToExecute = new LinkedList<>();
+        for (DecidedNotification notification : toExecute) {
+            if (notification.getInstance() == currentInstance) {
+                logger.debug("Executing pending operation from instance number {}", notification.getInstance());
+                execute(notification);
+            } else {
+                stillToExecute.add(notification);
+            }
+        }
+        toExecute = stillToExecute;
+    }
+
+    private List<Integer> myOpsExecuted = new LinkedList<>();
 
     /*--------------------------------- Notifications ---------------------------------------- */
     private void uponDecidedNotification(DecidedNotification notification, short sourceProto) {
@@ -184,21 +230,34 @@ public class StateMachine extends GenericProtocol {
         //Maybe we should make sure operations are executed in order?
         //You should be careful and check if this operation is an application operation (and send it up)
         //or if this is an operations that was executed by the state machine itself (in which case you should execute)
+        if (notification.getInstance() > currentInstance) {
+            logger.debug("This decided operation is not from my latest known instance, I will postpone the execution");
+            toExecute.add(notification);
+            return;
+        }
 
-        if (internalOperationsIds.contains(notification.getOpId())) {
-            // do the internal operation //todo
+        logger.debug("This decided operation is from current instance. Executing this operation and all pending operations (if any).");
+        execute(notification);
+        executePending();
+
+        if (currentOperation == null) { // we don't execute anything, and we don't have any queued orders
+            logger.debug("I didn't propose any operation, back to idle state");
+            return;
+        }
+
+        if (Objects.equals(notification.getOperation().getOpId(), currentOperation.getOpId())) {
+            logger.debug("Executed operation was the one proposed by me. Polling next operation from queue");
+            myOpsExecuted.add(notification.getInstance());
+            currentOperation = queue.poll();
+            if (currentOperation != null) {
+                logger.debug("Queue contains another operation. Proposing.");
+                sendRequest(new ProposeRequest(currentInstance, membership, currentOperation),
+                        Paxos.PROTOCOL_ID);
+            }
         } else {
-            triggerNotification(new ExecuteNotification(notification.getOpId(), notification.getOperation()));
-            nextInstance = Math.max(notification.getInstance(), nextInstance);
-            if (notification.getOpId().equals(currentOrder.getOpId())) {
-                currentOrder = null;
-            }
-            if (!queue.isEmpty()) {
-                OrderRequest request = queue.peek();
-                currentOrder = request;
-                sendRequest(new ProposeRequest(nextInstance++, request.getOpId(), request.getOperation()),
-                        IncorrectAgreement.PROTOCOL_ID);
-            }
+            logger.debug("Executed operation was NOT mine. Proposing my operation again.");
+            sendRequest(new ProposeRequest(currentInstance, membership, currentOperation),
+                    Paxos.PROTOCOL_ID);
         }
     }
 
@@ -208,22 +267,29 @@ public class StateMachine extends GenericProtocol {
         logger.error("Message {} to {} failed, reason: {}", msg, host, throwable);
     }
 
+    private final Set<Host> hostsWaitingToJoin = new HashSet<>();
+
     private void uponJoinMessage(JoinMessage msg, Host joiner, short sourceProtoId, int channelId) {
-        logger.info("{[]} JoinMessage received from {}", msg.getMid(), joiner);
-        membership.add(joiner);
-        CurrentStateRequest csRequest = new CurrentStateRequest(this.nextInstance, joiner);
-        sendRequest(csRequest, HashApp.PROTO_ID);
-        logger.info("{} CurrentStateRequest for instance {}", self, this.nextInstance);
+        hostsWaitingToJoin.add(joiner);
+        OperationWrapper operation = new OperationWrapper(currentOperation.getOpId(), OpType.ADD_REPLICA, currentOperation.getOperation(), null);
+
+        if (currentOperation == null) {
+            sendRequest(new ProposeRequest(++currentInstance, membership, operation),
+                    Paxos.PROTOCOL_ID);
+        } else {
+            queue.offer(operation);
+        }
     }
 
     private void uponJoinOKMessage(JoinOKMessage msg, Host from, short sourceProtoId, int channelId){
-        logger.info("{[]} JoinOKMessage received for joiner {}, joined on instance = {}, with state", msg.getMid(), self, msg.getInstance());
-        if(!membership.contains(self))
-            membership.add(self);
-        state = State.ACTIVE;
-        nextInstance = msg.getInstance();
+        membership = msg.getMembership();
+        highestSequenceNumber = msg.getSequenceNumber();
+        currentInstance = msg.getInstance() + 1;
         InstallStateRequest insReq = new InstallStateRequest(msg.getState());
         sendRequest(insReq, HashApp.PROTO_ID);
+        JoinedNotification joinedNotification = new JoinedNotification(currentInstance, highestSequenceNumber);
+        triggerNotification(joinedNotification);
+        state = State.ACTIVE;
     }
 
     /* --------------------------------- TCPChannel Events ---------------------------- */
@@ -239,8 +305,14 @@ public class StateMachine extends GenericProtocol {
         logger.debug("Connection to {} failed, cause: {}", event.getNode(), event.getCause());
         //Maybe we don't want to do this forever. At some point we assume he is no longer there.
         //Also, maybe wait a little bit before retrying, or else you'll be trying 1000s of times per second
-        if(membership.contains(event.getNode()))
+        if(membership.contains(event.getNode())) {
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
             openConnection(event.getNode());
+        }
     }
 
     private void uponInConnectionUp(InConnectionUp event, int channelId) {
