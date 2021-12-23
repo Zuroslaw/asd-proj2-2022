@@ -16,6 +16,7 @@ import protocols.statemachine.notifications.ChannelReadyNotification;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.generic.ProtoTimer;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 public class Paxos extends GenericProtocol {
@@ -31,7 +32,6 @@ public class Paxos extends GenericProtocol {
     private final long TIMEOUT;
     private final Map<Integer, InstanceState> instances = new HashMap<>();
     private final Map<Integer, Long> instanceToTimerId = new HashMap<>();
-    private Set<Host> newestMembership;
 
     /*
         todo:
@@ -97,14 +97,16 @@ public class Paxos extends GenericProtocol {
             instance = new InstanceState(initialSequenceNumber, new HashSet<>());
             instances.put(msg.getInstance(), instance);
         }
-        if (msg.getSequenceNumber() > instance.getHighestPrepare()) { // I already promised higher number, don't respond if its smaller
+        if (msg.getSequenceNumber() > instance.getHighestPrepare()) {
             logger.debug("Updating highest prepare to: {}", msg.getSequenceNumber());
             instance.setHighestPrepare(msg.getSequenceNumber());
             PrepareOKMessage prepareOk = new PrepareOKMessage(msg.getInstance(), msg.getSequenceNumber(), instance.getHighestAccept(), instance.getHighestValue());
             logger.debug("Sending prepareOk message back: {}", prepareOk);
             sendMessage(prepareOk, host);
         } else {
-            logger.debug("I already promised higher number, I will not respond to this prepare message");
+            logger.debug("I already promised higher number, I will tell the proposer to abandon its proposal");
+            AbandonProposalMessage abandonMessage = new AbandonProposalMessage(msg.getInstance(), msg.getSequenceNumber());
+            sendMessage(abandonMessage, host);
         }
     }
 
@@ -137,6 +139,22 @@ public class Paxos extends GenericProtocol {
         }
     }
 
+    private void uponAbandonProposalMessage(AbandonProposalMessage msg, Host host, short sourceProto, int channelId) {
+        if (shouldNotParticipate(msg.getInstance())) {
+            logger.debug("I should not participate in this instance, ignoring msg from [{}]: {}", host, msg);
+            return;
+        }
+        InstanceState instance = instances.get(msg.getInstance());
+        if (msg.getSequenceNumber() == instance.getProposerSeq()) {
+            if (instance.getDecided() != null) {
+                ProtoTimer timer = cancelTimer(instanceToTimerId.get(msg.getInstance()));
+                resendProposal(msg.getInstance());
+                long newTimerId = setupTimer(timer, TIMEOUT);
+                instanceToTimerId.put(msg.getInstance(), newTimerId);
+            }
+        }
+    }
+
     private void uponAcceptMessage(AcceptMessage msg, Host host, short sourceProto, int channelId) {
         if (shouldNotParticipate(msg.getInstance())) {
             logger.debug("I should not participate in this instance, ignoring msg from [{}]: {}", host, msg);
@@ -161,7 +179,9 @@ public class Paxos extends GenericProtocol {
             instance.getAllProcesses()
                     .forEach(p -> sendMessage(acceptOk, p));
         } else {
-            logger.debug("Sequence number is lower then what I promised to accept, discarding message.");
+            logger.debug("I already promised higher number, I will tell the proposer to abandon its proposal");
+            AbandonProposalMessage abandonMessage = new AbandonProposalMessage(msg.getInstance(), msg.getSequenceNumber());
+            sendMessage(abandonMessage, host);
         }
     }
 
@@ -200,15 +220,21 @@ public class Paxos extends GenericProtocol {
     private void uponTimerTimout(TimeoutTimer timer, long timerId) {
         InstanceState instance = instances.get(timer.getInstance());
         if (instance.getDecided() == null) {
-            instance.setProposerSeq(instance.getProposerSeq() + instance.getAllProcesses().size());
-            PrepareMessage msg = new PrepareMessage(timer.getInstance(), instance.getProposerSeq());
-            logger.debug("Timer timed out. Incrementing sequence number to: {} and sending new prepare message: {}", instance.getProposerSeq(), msg);
-            instance.getAllProcesses()
-                    .forEach(host -> sendMessage(msg, host));
-            instance.setPrepareOkSet(new LinkedList<>());
+            logger.debug("Timer timed out.");
+            resendProposal(timer.getInstance());
             long newTimerId = setupTimer(timer, TIMEOUT);
             instanceToTimerId.put(timer.getInstance(), newTimerId);
         }
+    }
+
+    private void resendProposal(int instanceNumber) {
+        InstanceState instance = instances.get(instanceNumber);
+        instance.setProposerSeq(instance.getProposerSeq() + instance.getAllProcesses().size());
+        PrepareMessage msg = new PrepareMessage(instanceNumber, instance.getProposerSeq());
+        logger.debug("Incrementing sequence number to: {} and sending new prepare message: {}", instance.getProposerSeq(), msg);
+        instance.getAllProcesses()
+                .forEach(host -> sendMessage(msg, host));
+        instance.setPrepareOkSet(new LinkedList<>());
     }
 
     private boolean allAcceptOksEqual(InstanceState instance, AcceptOkMessage newMsg) {
@@ -245,12 +271,14 @@ public class Paxos extends GenericProtocol {
         registerMessageSerializer(cId, PrepareOKMessage.MSG_ID, PrepareOKMessage.serializer);
         registerMessageSerializer(cId, AcceptMessage.MSG_ID, AcceptMessage.serializer);
         registerMessageSerializer(cId, AcceptOkMessage.MSG_ID, AcceptOkMessage.serializer);
+        registerMessageSerializer(cId, AbandonProposalMessage.MSG_ID, AbandonProposalMessage.serializer);
         /*---------------------- Register Message Handlers -------------------------- */
         try {
             registerMessageHandler(cId, PrepareMessage.MSG_ID, this::uponPrepareMessage, this::uponMsgFail);
             registerMessageHandler(cId, PrepareOKMessage.MSG_ID, this::uponPrepareOkMessage, this::uponMsgFail);
             registerMessageHandler(cId, AcceptMessage.MSG_ID, this::uponAcceptMessage, this::uponMsgFail);
             registerMessageHandler(cId, AcceptOkMessage.MSG_ID, this::uponAcceptOkMessage, this::uponMsgFail);
+            registerMessageHandler(cId, AbandonProposalMessage.MSG_ID, this::uponAbandonProposalMessage, this::uponMsgFail);
         } catch (HandlerRegistrationException e) {
             logger.error(e);
         }

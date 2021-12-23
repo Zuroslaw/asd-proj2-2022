@@ -10,6 +10,7 @@ import protocols.app.requests.CurrentStateRequest;
 import protocols.app.requests.InstallStateRequest;
 import protocols.statemachine.messages.JoinMessage;
 import protocols.statemachine.messages.JoinOKMessage;
+import protocols.statemachine.timers.ConnectionTimer;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
@@ -43,10 +44,6 @@ import java.util.*;
 public class StateMachine extends GenericProtocol {
     private static final Logger logger = LogManager.getLogger(StateMachine.class);
 
-    public List<Integer> getMyOpsExecuted() {
-        return myOpsExecuted;
-    }
-
     private enum State {JOINING, ACTIVE}
 
     //Protocol information, to register in babel
@@ -60,6 +57,12 @@ public class StateMachine extends GenericProtocol {
     private Set<Host> membership;
     private int currentInstance;
     private OperationWrapper currentOperation = null;
+
+    private long highestSequenceNumber;
+
+    List<DecidedNotification> toExecute = new LinkedList<>();
+
+    private final Set<Host> hostsWaitingToJoin = new HashSet<>();
 
     private final Queue<OperationWrapper> queue = new LinkedList<>();
 
@@ -104,6 +107,8 @@ public class StateMachine extends GenericProtocol {
         /*--------------------- Register Message Serializers ----------------------------- */
         registerMessageSerializer(channelId, JoinMessage.MSG_ID, JoinMessage.serializer);
         registerMessageSerializer(channelId, JoinOKMessage.MSG_ID, JoinOKMessage.serializer);
+
+        registerTimerHandler(ConnectionTimer.TIMER_ID, this::uponConnectionTimer);
     }
 
     @Override
@@ -138,17 +143,14 @@ public class StateMachine extends GenericProtocol {
         } else {
             state = State.JOINING;
             logger.info("Starting in JOINING as I am not part of initial membership");
-            contactNode = initialMembership.get(0);
+            Host contactNode = initialMembership.get(0);
             openConnection(contactNode, channelId);
             JoinMessage jMsg = new JoinMessage(UUID.randomUUID());
             sendMessage(channelId, jMsg, contactNode);
             logger.info("JoinMessage sent from host {} to {}.", this.self, contactNode);
-            contactNode = null;
         }
 
     }
-
-    private Host contactNode;
 
     /*--------------------------------- Requests ---------------------------------------- */
     private void uponOrderRequest(OrderRequest request, short sourceProto) {
@@ -170,18 +172,16 @@ public class StateMachine extends GenericProtocol {
         }
     }
 
-    private long highestSequenceNumber;
-
     private void uponCurrentStateReply(CurrentStateReply reply, short sourceProto){
-        JoinOKMessage jOkMsg = new JoinOKMessage(UUID.randomUUID(), reply.getInstance(), reply.getState(), membership, ++highestSequenceNumber);
+        JoinOKMessage jOkMsg = new JoinOKMessage(UUID.randomUUID(), reply.getInstance(), reply.getState(), membership, highestSequenceNumber);
         sendMessage(jOkMsg, reply.getJoiner());
     }
 
-    List<DecidedNotification> toExecute = new LinkedList<>();
-
     private void handleAddReplica(DecidedNotification notification) {
+        ++highestSequenceNumber;
         membership.add(notification.getOperation().getHost());
         openConnection(notification.getOperation().getHost(), channelId);
+        logger.info("ADD_REPLICA decided, Host {} added to membership", notification.getOperation().getHost());
         if (hostsWaitingToJoin.contains(notification.getOperation().getHost())) {
             CurrentStateRequest request = new CurrentStateRequest(notification.getInstance(), notification.getOperation().getHost());
             sendRequest(request, HashApp.PROTO_ID);
@@ -190,8 +190,15 @@ public class StateMachine extends GenericProtocol {
 
     private void handleRemoveReplica(DecidedNotification notification) {
         membership.remove(notification.getOperation().getHost());
+        logger.info("REMOVE_REPLICA decided, Host {} removed from membership", notification.getOperation().getHost());
         if (notification.getOperation().getHost().equals(self)) {
-            //todo: handle joining again
+            state = State.JOINING;
+            logger.info("Trying to Join again, as I was removed from membership");
+            Host contactNode = membership.stream().findFirst().orElseThrow();
+            openConnection(contactNode, channelId);
+            JoinMessage jMsg = new JoinMessage(UUID.randomUUID());
+            sendMessage(channelId, jMsg, contactNode);
+            logger.info("JoinMessage sent from host {} to {}.", this.self, contactNode);
         }
     }
 
@@ -227,17 +234,28 @@ public class StateMachine extends GenericProtocol {
         toExecute = stillToExecute;
     }
 
-    private List<Integer> myOpsExecuted = new LinkedList<>();
-
     /*--------------------------------- Notifications ---------------------------------------- */
     private void uponDecidedNotification(DecidedNotification notification, short sourceProto) {
         logger.debug("Received notification: " + notification);
-        //Maybe we should make sure operations are executed in order?
-        //You should be careful and check if this operation is an application operation (and send it up)
-        //or if this is an operations that was executed by the state machine itself (in which case you should execute)
+
         if (notification.getInstance() > currentInstance) {
             logger.debug("This decided operation is not from my latest known instance, I will postpone the execution");
             toExecute.add(notification);
+            if (currentOperation == null) {
+                /*
+                    This part is to ensure that a replica with no client requests will still progress with learning the decision
+                    if there were messages lost and the replica can't learn a decision. It is useful especially for newly joined replicas
+                    which can lose some messages sent to them when they are still in JOINING state (and they do not receive client requests).
+                    Maybe it could be done on Paxos level, by queuing the messages, and maybe this solution is not useful in real world (replicas could just
+                    at some point after startup send a read request to catch up), but that's what useful for us to test if joining behaves correctly.
+                    Also, maybe a better idea in real world situation would be to use a timer here that checks periodically if replica is lagging behind,
+                    instead of doing it here.
+                 */
+                logger.debug("I'm lagging behind with my execution and I don't have any pending orders. I need to propose NULL to get previous decisions");
+                currentOperation = OperationWrapper.nullOperation();
+                sendRequest(new ProposeRequest(currentInstance, membership, currentOperation),
+                        Paxos.PROTOCOL_ID);
+            }
             return;
         }
 
@@ -252,7 +270,6 @@ public class StateMachine extends GenericProtocol {
 
         if (Objects.equals(notification.getOperation().getOpId(), currentOperation.getOpId())) {
             logger.debug("Executed operation was the one proposed by me. Polling next operation from queue");
-            myOpsExecuted.add(notification.getInstance());
             currentOperation = queue.poll();
             if (currentOperation != null) {
                 logger.debug("Queue contains another operation. Proposing.");
@@ -274,8 +291,6 @@ public class StateMachine extends GenericProtocol {
         logger.error("Message {} to {} failed, reason: {}", msg, host, throwable);
         throwable.printStackTrace();
     }
-
-    private final Set<Host> hostsWaitingToJoin = new HashSet<>();
 
     private void uponJoinMessage(JoinMessage msg, Host joiner, short sourceProtoId, int channelId) {
         hostsWaitingToJoin.add(joiner);
@@ -307,21 +322,44 @@ public class StateMachine extends GenericProtocol {
     }
 
     private void uponOutConnectionDown(OutConnectionDown event, int channelId) {
-        logger.debug("Connection to {} is down, cause {}", event.getNode(), event.getCause());
+        openConnection(event.getNode());
+        logger.error("Connection to {} is down, cause {}", event.getNode(), event.getCause());
     }
+
+    HashMap<Host, Integer> connectionsPending = new HashMap<>();
+
+    private final int maxAttempts = 15;
+    private final long connectionFailedTimeout = 1000;
 
     private void uponOutConnectionFailed(OutConnectionFailed<ProtoMessage> event, int channelId) {
         logger.debug("Connection to {} failed, cause: {}", event.getNode(), event.getCause());
         //Maybe we don't want to do this forever. At some point we assume he is no longer there.
         //Also, maybe wait a little bit before retrying, or else you'll be trying 1000s of times per second
-        if(membership.contains(event.getNode())) {
-            try {
-                Thread.sleep(1000); //todo
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            openConnection(event.getNode());
+        if (state == State.JOINING) {
+            return;
         }
+        Integer attempts = connectionsPending.getOrDefault(event.getNode(), 1);
+        if (attempts >= maxAttempts) {
+            connectionsPending.remove(event.getNode());
+            if (membership.contains(event.getNode())) {
+                logger.error("Exceeded max attempts to connect to {}. I will propose to remove this replica.", event.getNode());
+                OperationWrapper removeReplica = new OperationWrapper(UUID.randomUUID(), OpType.REMOVE_REPLICA, null, event.getNode());
+                if (currentOperation == null) {
+                    currentOperation = removeReplica;
+                    sendRequest(new ProposeRequest(currentInstance, membership, currentOperation), Paxos.PROTOCOL_ID);
+                } else {
+                    queue.offer(removeReplica);
+                }
+            }
+        } else {
+            connectionsPending.put(event.getNode(), attempts + 1);
+            setupTimer(new ConnectionTimer(event.getNode()), connectionFailedTimeout);
+        }
+    }
+
+    private void uponConnectionTimer(ConnectionTimer timer, long timerId) {
+        logger.debug("Retrying connection to: {}", timer.getHost());
+        openConnection(timer.getHost());
     }
 
     private void uponInConnectionUp(InConnectionUp event, int channelId) {

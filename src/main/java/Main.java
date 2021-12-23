@@ -63,7 +63,6 @@ public class Main {
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Goodbye");
-            logger.info("Number of my proposals decided: {}", sm.getMyOpsExecuted().size());
         }));
 
     }
