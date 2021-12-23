@@ -43,7 +43,7 @@ public class Main {
         // Application
         HashApp hashApp = new HashApp(props);
         // StateMachine Protocol
-        StateMachine sm = new StateMachine(props);
+        StateMachine sm = new StateMachine(props, Paxos.PROTOCOL_ID);
         // Agreement Protocol
         Paxos agreement = new Paxos(props);
 
@@ -61,15 +61,13 @@ public class Main {
         //Start babel and protocol threads
         babel.start();
 
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Goodbye");
-        }));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> logger.info("Goodbye")));
 
     }
 
     public static String getIpOfInterface(String interfaceName) throws SocketException {
         if(interfaceName.equalsIgnoreCase("lo"))
-        	return "127.0.0.1"; //This is an special exception to deal with the loopback.
+        	return "127.0.0.1"; //This is a special exception to deal with the loopback.
     	NetworkInterface networkInterface = NetworkInterface.getByName(interfaceName);
         System.out.println(networkInterface);
         Enumeration<InetAddress> inetAddress = networkInterface.getInetAddresses();

@@ -10,20 +10,19 @@ import java.util.List;
 import java.util.Set;
 
 public class InstanceState {
-    private OperationWrapper proposerValue = OperationWrapper.nullOperation();
+    private OperationWrapper proposerValue = OperationWrapper.NULL;
     private long proposerSeq;
     private long highestPrepare = -1;
     private long highestAccept = -1;
-    private OperationWrapper highestValue = OperationWrapper.nullOperation();
+    private OperationWrapper highestValue = OperationWrapper.NULL;
     private List<PrepareOKMessage> prepareOkSet = new LinkedList<>(); //set of PrepareOKMessages (with current sequence number)
     private List<AcceptOkMessage> acceptOkSet = new LinkedList<>(); //set of AcceptOKMessages (with the highest sequence number)
     private OperationWrapper decided; //locally decided op
-    private Set<Host> allProcesses; //contains all processes
+    private Set<Host> allProcesses = new HashSet<>(); //contains all processes
 
-    public InstanceState(long proposerSeq, Set<Host> membership) {
+    public InstanceState(long proposerSeq) {
         //this.proposerSeq = processId; //todo: maybe not needed, sendMessage automatically sends processId
         this.proposerSeq = proposerSeq;
-        this.allProcesses = membership;
     }
 
     public OperationWrapper getProposerValue() {

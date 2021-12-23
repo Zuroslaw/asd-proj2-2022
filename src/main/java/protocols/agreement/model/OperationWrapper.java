@@ -6,7 +6,6 @@ import pt.unl.fct.di.novasys.network.ISerializer;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -23,9 +22,7 @@ public class OperationWrapper {
         this.host = host;
     }
 
-    public static OperationWrapper nullOperation() {
-        return new OperationWrapper(null, OpType.NULL, null, null);
-    }
+    public static OperationWrapper NULL = new OperationWrapper(null, OpType.NULL, null, null);
 
     public UUID getOpId() {
         return opId;
